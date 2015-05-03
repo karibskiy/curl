@@ -1,43 +1,66 @@
 <?PHP 
+function multiCurl($data, $options = array()) 
+{
 
-$ch = curl_init('http://php.su/forum/loginout.php');
-# /forum/loginout.php HTTP/1.1
+  $curls = array();
+  // Массив дескрипторов. Библиотека создает много экземпляров своего 
+  // механизма, но работать они будут параллельно
+  
+  $result = array();
+  // массив с результатами запрошенных страниц которые наша функция вернет.
 
-curl_setopt($ch, CURLOPT_POST, 1);
-# POST /forum/..
+  $mh = curl_multi_init();
+  // Дескриптор мульти потока. Тоесть эта штука отвечает за то, чтобы много
+  // запросов шли параллельно.
 
+  foreach ($data as $id => $d) {
 
-curl_setopt ($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (бла бла бла..) "); 
-# User-Agent
+    $curls[$id] = curl_init();
+    // Для каждого url создаем отдельный curl механизм чтоб посылал запрос)
 
+    $url = (is_array($d) && !empty($d['url'])) ? $d['url'] : $d;
+    // Если $d это массив (как в случае с пост), то достаем из массива url
+    // если это не массив, а уже ссылка - то берем сразу ссылку
 
-$headers = array
-(
-    'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*;q=0.8',
-    'Accept-Language: ru,en-us;q=0.7,en;q=0.3',
-    'Accept-Encoding: deflate',
-    'Accept-Charset: windows-1251,utf-8;q=0.7,*;q=0.7'
-); 
+    curl_setopt($curls[$id], CURLOPT_URL,            $url);
+    curl_setopt($curls[$id], CURLOPT_HEADER,         0);
+    curl_setopt($curls[$id], CURLOPT_RETURNTRANSFER, 1);
 
-curl_setopt($ch, CURLOPT_HTTPHEADER,$headers); 
-# добавляем заголовков к нашему запросу. Чтоб смахивало на настоящих
+    // Если у нас есть пост данные, тоесть запрос отправляется постом 
+    // устанавливаем флаги и добавляем сами данные
+    if (is_array($d) && !empty($d['post'])) 
+    {
+        curl_setopt($curls[$id], CURLOPT_POST,       1);
+        curl_setopt($curls[$id], CURLOPT_POSTFIELDS, $d['post']);
+    }
+  
 
-curl_setopt($ch, CURLOPT_REFERER, "http://php.su/forum/loginout.php");
-# Подделываем значение - откуда пришли данные.
+    // Если указали дополнительные параметры $options то устанавливаем их
+    // смотри документацию функции curl_setopt_array
+    if (count($options)>0) curl_setopt_array($curls[$id], $options);
 
-curl_setopt($ch, CURLOPT_POSTFIELDS, 'action=login&imembername=valenok&ipassword=ne_skaju&submit=%C2%F5%EE%E4');
-# post данные.
-# умная libcurl сама добавит заголовки
-# Content-Type: application/x-www-form-urlencoded и Content-Length: 71
+    // добавляем текущий механизм к числу работающих параллельно
+    curl_multi_add_handle($mh, $curls[$id]);
+  }
 
-curl_setopt($ch, CURLOPT_COOKIEJAR, "my_cookies.txt");  
-curl_setopt($ch, CURLOPT_COOKIEFILE, "my_cookies.txt");  
-# Функции для обработки установливаемых форумом кук.
-# подробнее рассмотрим далее.
+  // число работающих процессов.
+  $running = null;
 
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
-# Убираем вывод данных в браузер. Пусть функция их возвращает а не выводит
+  // curl_mult_exec запишет в переменную running количество еще не завершившихся
+  // процессов. Пока они есть - продолжаем выполнять запросы.
+  do { curl_multi_exec($mh, $running); } while($running > 0);
 
-$result = curl_exec($ch); // выполняем запрос curl
-curl_close($ch);
+  // Собираем из всех созданных механизмов результаты, а сами механизмы удаляем
+  foreach($curls as $id => $c) 
+  {
+    $result[$id] = curl_multi_getcontent($c);
+    curl_multi_remove_handle($mh, $c);
+  }
+
+  // Освобождаем память от механизма мультипотоков
+  curl_multi_close($mh);
+
+  // возвращаем данные собранные из всех потоков.
+  return $result;
+}
 ?>
